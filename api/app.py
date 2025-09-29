@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 import os
 import uuid
@@ -6,7 +6,7 @@ import json
 from analyzer import analyze_site_plan, create_highlighted_overview
 import traceback
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 CORS(app)  # Allow requests from React (default localhost:3000)
 
 UPLOAD_FOLDER = 'uploads'
@@ -179,6 +179,81 @@ def highlight_plot():
         print(f"Error highlighting plot: {str(e)}")
         traceback.print_exc()
         return jsonify({'error': f"Highlighting failed: {str(e)}"}), 500
+
+@app.route('/')
+def home():
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Site Analyzer API</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            h1 { color: #2c3e50; }
+            .endpoint { background: #f8f9fa; padding: 15px; margin: 10px 0; border-left: 4px solid #007bff; }
+            .method { font-weight: bold; color: #007bff; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🏗️ Site Analyzer API</h1>
+            <p>A Flask-based service for analyzing site plans using computer vision techniques.</p>
+
+            <h2>Available Endpoints</h2>
+
+            <div class="endpoint">
+                <span class="method">GET</span> /<br>
+                <small>This homepage with service information</small>
+            </div>
+
+            <div class="endpoint">
+                <span class="method">GET</span> /info<br>
+                <small>Detailed service information and API documentation</small>
+            </div>
+
+            <div class="endpoint">
+                <span class="method">POST</span> /analyze<br>
+                <small>Upload and analyze a site plan image</small>
+            </div>
+
+            <div class="endpoint">
+                <span class="method">POST</span> /highlight-plot<br>
+                <small>Generate highlighted overview for a specific plot</small>
+            </div>
+
+            <div class="endpoint">
+                <span class="method">GET</span> /site_plan_output/<filename><br>
+                <small>Retrieve generated analysis output files</small>
+            </div>
+
+            <h2>Quick Start</h2>
+            <p>Visit <a href="/info">/info</a> for detailed API documentation and usage examples.</p>
+
+            <h2>Frontend</h2>
+            <p>The companion frontend application is available in the sister directory. See the frontend README for setup instructions.</p>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route('/info')
+def info():
+    try:
+        return render_template('info.html')
+    except:
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Site Analyzer API - Info</title>
+        </head>
+        <body>
+            <h1>Site Analyzer API</h1>
+            <p>Service information template not found. Please check the templates directory.</p>
+        </body>
+        </html>
+        '''
 
 @app.route('/site_plan_output/<path:filename>')
 def serve_output_file(filename):
