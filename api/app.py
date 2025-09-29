@@ -1,17 +1,21 @@
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
 import uuid
-import json  # Added import
-from analyzer import analyze_site_plan
+import json
+from analyzer import analyze_site_plan, create_highlighted_overview
 import traceback
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Allow requests from React (default localhost:3000)
 
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'site_plan_output'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+# Store the current analysis data globally (in production, use a database)
+current_plots_data = []
+current_original_image = None
 
 # Ensure folders exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -20,12 +24,10 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/')
-def home():
-    return render_template('info.html')
-
 @app.route('/analyze', methods=['POST'])
 def analyze_image():
+    global current_plots_data, current_original_image
+    
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
@@ -47,6 +49,11 @@ def analyze_image():
 
         # Run analysis
         plots_data = analyze_site_plan(image_path, save_individual_plots=True, output_format=output_format)
+        
+        # Store data globally for highlighting functionality
+        current_plots_data = plots_data
+        import cv2
+        current_original_image = cv2.imread(image_path)
 
         # Prepare response
         response = {
@@ -61,6 +68,12 @@ def analyze_image():
         if os.path.exists(json_path):
             with open(json_path, 'r') as f:
                 response['summary'] = json.load(f)['site_plan_analysis']
+
+        # Read interactive data
+        interactive_data_path = os.path.join(OUTPUT_FOLDER, 'interactive_data.json')
+        if os.path.exists(interactive_data_path):
+            with open(interactive_data_path, 'r') as f:
+                response['interactive_data'] = json.load(f)
 
         if output_format == 'svg':
             response['svgs'] = {}
@@ -97,6 +110,13 @@ def analyze_image():
                     encoded = base64.b64encode(f.read()).decode('utf-8')
                     response['images']['overview'] = f'data:image/{output_format};base64,{encoded}'
 
+            # Read base overview image (without highlights)
+            base_overview_image = os.path.join(OUTPUT_FOLDER, f'site_plan_base_overview.{output_format}')
+            if os.path.exists(base_overview_image):
+                with open(base_overview_image, 'rb') as f:
+                    encoded = base64.b64encode(f.read()).decode('utf-8')
+                    response['images']['base_overview'] = f'data:image/{output_format};base64,{encoded}'
+
             for plot in plots_data:
                 # Individual plot images with dimensions
                 shape_type = plot['shape_type'].lower()
@@ -127,14 +147,42 @@ def analyze_image():
         traceback.print_exc()
         return jsonify({'error': f"Analysis failed: {str(e)}"}), 500
 
-@app.route('/info')
-def info():
-    return render_template('info.html')
+@app.route('/highlight-plot', methods=['POST'])
+def highlight_plot():
+    global current_plots_data, current_original_image
+    
+    try:
+        data = request.get_json()
+        if not data or 'plot_id' not in data:
+            return jsonify({'error': 'Plot ID is required'}), 400
+        
+        plot_id = data['plot_id']
+        
+        # Validate that we have the required data
+        if not current_plots_data or current_original_image is None:
+            return jsonify({'error': 'No analysis data available. Please run analysis first.'}), 400
+        
+        # Find the plot
+        selected_plot = next((plot for plot in current_plots_data if plot['id'] == plot_id), None)
+        if not selected_plot:
+            return jsonify({'error': f'Plot {plot_id} not found'}), 404
+        
+        # Generate highlighted overview
+        highlighted_svg = create_highlighted_overview(current_original_image, current_plots_data, plot_id)
+        
+        if highlighted_svg:
+            return jsonify({'highlighted_overview': highlighted_svg}), 200
+        else:
+            return jsonify({'error': 'Failed to generate highlighted overview'}), 500
+            
+    except Exception as e:
+        print(f"Error highlighting plot: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f"Highlighting failed: {str(e)}"}), 500
 
 @app.route('/site_plan_output/<path:filename>')
 def serve_output_file(filename):
     return send_file(os.path.join(OUTPUT_FOLDER, filename))
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    app.run(debug=True, host='0.0.0.0', port=5000)

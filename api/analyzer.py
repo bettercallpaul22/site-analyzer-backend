@@ -1,16 +1,15 @@
 import cv2
 import numpy as np
 import matplotlib
-matplotlib.use('SVG')  # Use SVG backend for better SVG support
+matplotlib.use('SVG')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.patches import Polygon as MPLPolygon
-from shapely.geometry import Polygon, LineString, Point
-from shapely.ops import unary_union
-import json
+import io
+import base64
 import os
+import json
 import re
-from collections import defaultdict
 
 # Optional imports
 try:
@@ -19,6 +18,7 @@ try:
 except ImportError:
     HAS_TESSERACT = False
     print("Warning: pytesseract not found. OCR text extraction will be disabled.")
+
 
 def load_and_preprocess_image(image_path):
     """
@@ -43,58 +43,6 @@ def load_and_preprocess_image(image_path):
 
     return original_image, binary
 
-def detect_all_polygon_plots(binary_image, original_image):
-    """
-    Detect all types of polygon plots (quadrilateral, pentagonal, hexagonal, etc.) - excluding triangles
-    """
-    print("Detecting all polygon plots (4+ sides)...")
-    contours, hierarchy = cv2.findContours(binary_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    polygon_plots = []
-    min_area = 3000
-    max_area = original_image.shape[0] * original_image.shape[1] * 0.4
-
-    for i, contour in enumerate(contours):
-        area = cv2.contourArea(contour)
-        if min_area < area < max_area:
-            epsilon = 0.015 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            if len(approx) >= 4:
-                x, y, w, h = cv2.boundingRect(contour)
-                hull = cv2.convexHull(contour)
-                hull_area = cv2.contourArea(hull)
-                solidity = float(area) / hull_area if hull_area > 0 else 0
-                perimeter = cv2.arcLength(contour, True)
-                perimeter_ratio = perimeter / np.sqrt(area) if area > 0 else 0
-                if solidity > 0.3 and perimeter_ratio < 20:
-                    M = cv2.moments(contour)
-                    centroid = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
-                    polygon_plots.append({
-                        'contour': contour,
-                        'approx': approx,
-                        'area': area,
-                        'centroid': centroid,
-                        'bounding_rect': (x, y, w, h),
-                        'num_sides': len(approx),
-                        'solidity': solidity,
-                        'perimeter_ratio': perimeter_ratio,
-                        'shape_type': get_shape_type(len(approx))
-                    })
-
-    polygon_plots.sort(key=lambda x: x['area'], reverse=True)
-    print(f"Found {len(polygon_plots)} polygon plots")
-    for i, plot in enumerate(polygon_plots):
-        print(f"  Plot {i+1}: {plot['shape_type']} ({plot['num_sides']} sides), Area: {plot['area']:.0f} pixels")
-    return polygon_plots
-
-def get_shape_type(num_sides):
-    """
-    Get descriptive name for polygon based on number of sides (4+ sides only)
-    """
-    shape_names = {
-        4: "Quadrilateral", 5: "Pentagon", 6: "Hexagon",
-        7: "Heptagon", 8: "Octagon"
-    }
-    return shape_names.get(num_sides, f"{num_sides}-sided polygon")
 
 def detect_scale_and_convert_units_accurate(image):
     """
@@ -151,6 +99,110 @@ def detect_scale_and_convert_units_accurate(image):
 
     return scale_factor, detected_scale, scale_info
 
+
+def get_shape_type(num_sides):
+    """
+    Get descriptive name for polygon based on number of sides (4+ sides only)
+    """
+    shape_names = {
+        4: "Quadrilateral", 5: "Pentagon", 6: "Hexagon",
+        7: "Heptagon", 8: "Octagon"
+    }
+    return shape_names.get(num_sides, f"{num_sides}-sided polygon")
+
+
+def detect_all_polygon_plots(binary_image, original_image):
+    """
+    Detect all types of polygon plots (quadrilateral, pentagonal, hexagonal, etc.) - excluding triangles
+    """
+    print("Detecting all polygon plots (4+ sides)...")
+    contours, hierarchy = cv2.findContours(binary_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    polygon_plots = []
+    min_area = 3000
+    max_area = original_image.shape[0] * original_image.shape[1] * 0.4
+
+    for i, contour in enumerate(contours):
+        area = cv2.contourArea(contour)
+        if min_area < area < max_area:
+            epsilon = 0.015 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            if len(approx) >= 4:
+                x, y, w, h = cv2.boundingRect(contour)
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                solidity = float(area) / hull_area if hull_area > 0 else 0
+                perimeter = cv2.arcLength(contour, True)
+                perimeter_ratio = perimeter / np.sqrt(area) if area > 0 else 0
+                if solidity > 0.3 and perimeter_ratio < 20:
+                    M = cv2.moments(contour)
+                    centroid = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
+                    polygon_plots.append({
+                        'contour': contour,
+                        'approx': approx,
+                        'area': area,
+                        'centroid': centroid,
+                        'bounding_rect': (x, y, w, h),
+                        'num_sides': len(approx),
+                        'solidity': solidity,
+                        'perimeter_ratio': perimeter_ratio,
+                        'shape_type': get_shape_type(len(approx))
+                    })
+
+    polygon_plots.sort(key=lambda x: x['area'], reverse=True)
+    print(f"Found {len(polygon_plots)} polygon plots")
+    for i, plot in enumerate(polygon_plots):
+        print(f"  Plot {i+1}: {plot['shape_type']} ({plot['num_sides']} sides), Area: {plot['area']:.0f} pixels")
+    return polygon_plots
+
+
+def detect_rectangular_plots_alternative(binary_image, original_image):
+    """
+    Alternative method for detecting rectangular plots when primary method fails
+    """
+    print("Using alternative rectangular plot detection...")
+    
+    # Apply morphological operations to enhance rectangular shapes
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    binary_enhanced = cv2.morphologyEx(binary_image, cv2.MORPH_CLOSE, kernel)
+    binary_enhanced = cv2.morphologyEx(binary_enhanced, cv2.MORPH_OPEN, kernel)
+    
+    contours, _ = cv2.findContours(binary_enhanced, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    rectangular_plots = []
+    min_area = 2000
+    max_area = original_image.shape[0] * original_image.shape[1] * 0.5
+    
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if min_area < area < max_area:
+            # Check if it's roughly rectangular
+            x, y, w, h = cv2.boundingRect(contour)
+            rect_area = w * h
+            extent = float(area) / rect_area
+            
+            if extent > 0.7:  # At least 70% of bounding rectangle
+                epsilon = 0.02 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                
+                if len(approx) >= 4:  # At least 4 vertices
+                    M = cv2.moments(contour)
+                    centroid = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
+                    
+                    rectangular_plots.append({
+                        'contour': contour,
+                        'approx': approx,
+                        'area': area,
+                        'centroid': centroid,
+                        'bounding_rect': (x, y, w, h),
+                        'num_sides': len(approx),
+                        'shape_type': get_shape_type(len(approx))
+                    })
+    
+    rectangular_plots.sort(key=lambda x: x['area'], reverse=True)
+    print(f"Alternative method found {len(rectangular_plots)} plots")
+    return rectangular_plots
+
+
 def calculate_polygon_edge_lengths(vertices, scale_factor):
     """
     Calculate the length of each edge of a polygon in meters
@@ -170,6 +222,7 @@ def calculate_polygon_edge_lengths(vertices, scale_factor):
             'length_meters': round(meter_distance, 1)
         })
     return edge_lengths
+
 
 def detect_dimension_labels_enhanced(image, plot_contour, plot_bounds, edge_lengths):
     """
@@ -242,6 +295,7 @@ def detect_dimension_labels_enhanced(image, plot_contour, plot_bounds, edge_leng
         final_dimensions.append(edge_info)
     return final_dimensions
 
+
 def extract_area_from_plot_center(image, plot_bounds):
     """
     Extract the area value specifically from the center of the plot
@@ -252,6 +306,19 @@ def extract_area_from_plot_center(image, plot_bounds):
     center_y = y + int(h * (0.5 - center_margin/2))
     center_w = int(w * center_margin)
     center_h = int(h * center_margin)
+    
+    # Ensure we don't go outside image boundaries
+    center_x = max(0, center_x)
+    center_y = max(0, center_y)
+    center_w = min(center_w, image.shape[1] - center_x)
+    center_h = min(center_h, image.shape[0] - center_y)
+    
+    if center_w <= 0 or center_h <= 0:
+        # Fallback to estimated area if ROI is invalid
+        pixel_area = plot_bounds[2] * plot_bounds[3]
+        estimated_area = round(pixel_area * 0.0025)  # Rough estimate: 0.0025 sq.m per pixel
+        return estimated_area
+    
     center_roi = image[center_y:center_y+center_h, center_x:center_x+center_w]
 
     if HAS_TESSERACT and center_roi.size > 0:
@@ -260,44 +327,298 @@ def extract_area_from_plot_center(image, plot_bounds):
             roi_enhanced = cv2.resize(roi_gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
             custom_config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=0123456789.'
             text = pytesseract.image_to_string(roi_enhanced, config=custom_config).strip()
+            
             numbers = re.findall(r'\d+\.?\d*', text)
             if numbers:
-                areas = [float(num) for num in numbers if float(num) >= 50]
-                return max(areas) if areas else max([float(num) for num in numbers])
+                # Filter for reasonable area values (assuming residential plots)
+                areas = [float(num) for num in numbers if 50 <= float(num) <= 2000]
+                if areas:
+                    return max(areas)
+                else:
+                    # If no reasonable areas found, return the largest number
+                    all_nums = [float(num) for num in numbers]
+                    if all_nums:
+                        return max(all_nums)
         except Exception as e:
             print(f"Area extraction failed: {e}")
 
+    # Fallback to estimated area based on pixel area
     pixel_area = plot_bounds[2] * plot_bounds[3]
-    estimated_area = round(pixel_area / 1000, 1)
+    estimated_area = round(pixel_area * 0.0025)  # Rough estimate: 0.0025 sq.m per pixel
     return estimated_area
 
-def create_styled_output(original_image, plots_data, output_dir='site_plan_output', save_individual_plots=True, output_format='svg'):
+
+def create_highlighted_overview(original_image, plots_data, selected_plot_id, output_format='svg'):
     """
-    Create styled output with yellow highlighting, saving in specified format
+    Create a dynamically highlighted overview where only the selected plot is highlighted
+    with a distinct color while others remain in default colors
+    """
+    print(f"Creating highlighted overview for plot {selected_plot_id}...")
+    
+    try:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        original_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+        ax.imshow(original_rgb, alpha=0.7)
+
+        # Define colors for highlighting with transparency
+        selected_colors = {
+            'fill': '#f7eb07cc',  # Yellow with 80% opacity
+            'stroke': '#262323'   # Dark stroke
+        }
+        
+        default_colors = {
+            'fill': '#dadada', 
+            'stroke': '#f7eb07'   # Yellow stroke
+        }
+
+        for plot in plots_data:
+            vertices = plot['approx'].reshape(-1, 2)
+            
+            # Use different colors based on selection
+            if plot['id'] == selected_plot_id:
+                # Highlight the selected plot
+                polygon = MPLPolygon(vertices,
+                                   facecolor=selected_colors['fill'],
+                                   edgecolor=selected_colors['stroke'],
+                                   linewidth=3)
+            else:
+                # Use default colors for other plots
+                polygon = MPLPolygon(vertices,
+                                   facecolor=default_colors['fill'],
+                                   edgecolor=default_colors['stroke'],
+                                   linewidth=1)
+            
+            # Set GID for interactive functionality
+            polygon.set_gid(f"plot_{plot['id']}")
+            ax.add_patch(polygon)
+            
+            # Display area value instead of plot ID
+            centroid = plot['centroid']
+            text_color = 'white' if plot['id'] == selected_plot_id else 'black'
+            font_weight = 'bold' if plot['id'] == selected_plot_id else 'normal'
+            font_size = 14 if plot['id'] == selected_plot_id else 12
+            
+            # Show area value at centroid
+            area_text = f"{plot['area_value']}"
+
+            ax.text(centroid[0], centroid[1], area_text,
+                    fontsize=font_size, fontweight=font_weight, ha='center', va='center',
+                    color=text_color,
+                    bbox=dict(facecolor='white' if plot['id'] != selected_plot_id else 'black',
+                             alpha=0.8, pad=3, edgecolor='none'))
+
+            # Add edge dimensions for highlighted plot
+            if plot['id'] == selected_plot_id:
+                for dim in plot.get('edge_dimensions', []):
+                    start = dim['start_point']
+                    end = dim['end_point']
+                    mid_x = (start[0] + end[0]) / 2
+                    mid_y = (start[1] + end[1]) / 2
+
+                    # Add dimension text in meters
+                    ax.text(mid_x, mid_y, f"{dim['length_meters']}m",
+                            ha='center', va='center', fontsize=10, fontweight='bold',
+                            color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.9))
+
+        ax.set_title(f'Site Plan - Plot {selected_plot_id} Highlighted',
+                    fontsize=16, fontweight='bold')
+        ax.axis('off')
+        plt.tight_layout()
+
+        # Convert to SVG string
+        if output_format == 'svg':
+            svg_buffer = io.StringIO()
+            plt.savefig(svg_buffer, format='svg', bbox_inches='tight')
+            svg_content = svg_buffer.getvalue()
+            svg_buffer.close()
+            plt.close()
+            return svg_content
+        else:
+            # For other formats, convert to base64
+            img_buffer = io.BytesIO()
+            plt.savefig(img_buffer, format=output_format, bbox_inches='tight', dpi=300)
+            img_buffer.seek(0)
+            img_base64 = base64.b64encode(img_buffer.read()).decode('utf-8')
+            img_buffer.close()
+            plt.close()
+            return f'data:image/{output_format};base64,{img_base64}'
+            
+    except Exception as e:
+        print(f"Error creating highlighted overview: {e}")
+        plt.close()
+        return None
+
+
+def create_individual_highlighted_overviews(original_image, plots_data, output_dir='site_plan_output', output_format='svg'):
+    """
+    Create individual overview images with each plot highlighted one at a time
+    """
+    print("Creating individual highlighted overview images...")
+    
+    for plot in plots_data:
+        highlighted_svg = create_highlighted_overview(original_image, plots_data, plot['id'], output_format)
+        if highlighted_svg:
+            filename = f'plot_{plot["id"]}_overview_highlighted.{output_format}'
+            filepath = os.path.join(output_dir, filename)
+            
+            if output_format == 'svg':
+                with open(filepath, 'w') as f:
+                    f.write(highlighted_svg)
+            else:
+                # For other formats, the function returns base64 data
+                img_data = base64.b64decode(highlighted_svg.split(',')[1])
+                with open(filepath, 'wb') as f:
+                    f.write(img_data)
+            
+            print(f"Saved: {filename}")
+
+
+def create_individual_plot_images_enhanced(plots_data, output_dir='site_plan_output', save_individual_plots=True, output_format='svg'):
+    """
+    Create individual plot images with enhanced details
+    """
+    if not save_individual_plots:
+        return
+    
+    print("Creating individual plot images...")
+    
+    for plot in plots_data:
+        try:
+            create_single_plot_image(plot, output_dir, output_format)
+        except Exception as e:
+            print(f"Failed to create image for plot {plot['id']}: {e}")
+
+
+def create_single_plot_image(plot_data, output_dir, output_format='svg'):
+    """
+    Create a detailed image for a single plot
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Plot the vertices
+    vertices = np.array(plot_data['vertices'])
+    vertices = np.vstack([vertices, vertices[0]])  # Close the polygon
+    
+    ax.plot(vertices[:, 0], vertices[:, 1], 'b-', linewidth=2, marker='o', markersize=6)
+    ax.fill(vertices[:, 0], vertices[:, 1], alpha=0.3, color='lightblue')
+    
+    # Add vertex labels
+    for i, (x, y) in enumerate(plot_data['vertices']):
+        ax.annotate(f'V{i+1}', (x, y), xytext=(5, 5), textcoords='offset points',
+                   fontsize=10, fontweight='bold')
+    
+    # Add edge dimensions
+    for dim in plot_data.get('edge_dimensions', []):
+        start = dim['start_point']
+        end = dim['end_point']
+        mid_x = (start[0] + end[0]) / 2
+        mid_y = (start[1] + end[1]) / 2
+        
+        # Add dimension text
+        source_indicator = "📖" if dim.get('source') == 'OCR_detected' else "📏"
+        ax.text(mid_x, mid_y, f"{source_indicator}{dim['length_meters']}m",
+                ha='center', va='center', fontsize=10, fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+    
+    # Add plot info with area value prominently displayed
+    info_text = f"Plot {plot_data['id']} ({plot_data['shape_type']})\n"
+    info_text += f"Area: {plot_data['area_value']} sq.m\n"
+    info_text += f"Vertices: {len(plot_data['vertices'])}"
+    
+    ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=12,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    # Add area value at centroid
+    centroid_x = np.mean([v[0] for v in plot_data['vertices']])
+    centroid_y = np.mean([v[1] for v in plot_data['vertices']])
+    ax.text(centroid_x, centroid_y, f"{plot_data['area_value']}", 
+            fontsize=16, fontweight='bold', ha='center', va='center',
+            bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.9))
+    
+    ax.set_title(f'Plot {plot_data["id"]} - Detailed View', fontsize=14, fontweight='bold')
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3)
+    ax.set_xlabel('X (pixels)')
+    ax.set_ylabel('Y (pixels)')
+    
+    plt.tight_layout()
+    
+    filename = f'plot_{plot_data["id"]}_detail.{output_format}'
+    filepath = os.path.join(output_dir, filename)
+    plt.savefig(filepath, format=output_format, bbox_inches='tight', dpi=300 if output_format == 'jpeg' else None)
+    plt.close()
+    
+    print(f"Saved: {filename}")
+
+
+def create_styled_output(original_image, plots_data, output_dir='site_plan_output', save_individual_plots=True, output_format='svg', interactive_mode=True, highlighted_plot_id=None):
+    """
+    Updated create_styled_output to support dynamic highlighting and display area values
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     print("Creating styled visualization...")
-    print(f"About to call create_individual_highlighted_overviews with {len(plots_data)} plots")
     fig, ax = plt.subplots(figsize=(12, 8))
     original_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
     ax.imshow(original_rgb, alpha=0.7)
 
-    for i, plot in enumerate(plots_data):
+    # Define colors
+    selected_colors = {
+        'fill': '#f7eb07cc',    # Bright yellow for highlighted plot (80% opacity)
+        'stroke': "#262323"   # Dark stroke
+    }
+    
+    default_colors = {
+        'fill': '#dadada',    # Default white
+        'stroke': '#f7eb07'   # Default yellow stroke
+    }
+
+    for plot in plots_data:
         vertices = plot['approx'].reshape(-1, 2)
-        polygon = MPLPolygon(vertices, facecolor='yellow', edgecolor='orange',
-                           linewidth=2, alpha=0.6)
+        
+        # Choose colors based on whether this plot is highlighted
+        if highlighted_plot_id and plot['id'] == highlighted_plot_id:
+            colors = selected_colors
+            linewidth = 3
+        else:
+            colors = default_colors
+            linewidth = 1
+
+        if interactive_mode:
+            polygon = MPLPolygon(vertices, facecolor=colors['fill'], edgecolor=colors['stroke'], linewidth=linewidth)
+            polygon.set_gid(f"plot_{plot['id']}")
+        else:
+            polygon = MPLPolygon(vertices, facecolor=colors['fill'], edgecolor=colors['stroke'], linewidth=linewidth)
+
         ax.add_patch(polygon)
         centroid = plot['centroid']
+        
+        # Adjust text styling for highlighted plot and display area value
+        text_color = 'white' if highlighted_plot_id and plot['id'] == highlighted_plot_id else 'black'
+        font_weight = 'bold' if highlighted_plot_id and plot['id'] == highlighted_plot_id else 'normal'
+        font_size = 14 if highlighted_plot_id and plot['id'] == highlighted_plot_id else 12
+        
+        # Display area value instead of plot ID
         area_text = f"{plot['area_value']}"
+        
         ax.text(centroid[0], centroid[1], area_text,
-                fontsize=12, fontweight='bold', ha='center', va='center')
+                fontsize=font_size, fontweight=font_weight, ha='center', va='center',
+                color=text_color,
+                bbox=dict(facecolor='white' if not (highlighted_plot_id and plot['id'] == highlighted_plot_id) else 'black',
+                         alpha=0.8, pad=3, edgecolor='none'))
 
-    ax.set_title('Site Plan - Plot Detection', fontsize=16, fontweight='bold')
+    title = f'Site Plan - Plot {highlighted_plot_id} Highlighted' if highlighted_plot_id else 'Site Plan - Plot Detection'
+    ax.set_title(title, fontsize=16, fontweight='bold')
     ax.axis('off')
     plt.tight_layout()
-    overview_filename = f'site_plan_overview.{output_format}'
+    
+    # Save with appropriate filename
+    if highlighted_plot_id:
+        overview_filename = f'site_plan_overview_highlighted_{highlighted_plot_id}.{output_format}'
+    else:
+        overview_filename = f'site_plan_overview.{output_format}' if interactive_mode else f'site_plan_overview_static.{output_format}'
+    
     plt.savefig(os.path.join(output_dir, overview_filename), format=output_format, bbox_inches='tight', dpi=300 if output_format == 'jpeg' else None)
     plt.close()
 
@@ -307,392 +628,40 @@ def create_styled_output(original_image, plots_data, output_dir='site_plan_outpu
     create_individual_plot_images_enhanced(plots_data, output_dir, save_individual_plots, output_format)
     return True
 
-def create_individual_highlighted_overviews(original_image, plots_data, output_dir, output_format='svg'):
-    """
-    Create individual overview images where only one plot is highlighted with dimension labels
-    positioned along the actual edge angles
-    """
-    print("Creating individual highlighted overview SVGs with dimension labels...")
-    print(f"Number of plots: {len(plots_data)}")
-    original_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
-
-    for plot in plots_data:
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.imshow(original_rgb, alpha=0.7)
-
-        # Only highlight the current plot
-        plot_polygon = Polygon(plot['approx'].reshape(-1, 2))
-        plot_centroid = np.array(plot_polygon.centroid.coords[0])
-
-        # Fallback to moments centroid if shapely fails
-        if plot_centroid is None:
-            plot_centroid = np.array(plot['centroid'])
-
-
-        vertices = plot['approx'].reshape(-1, 2)
-        polygon = MPLPolygon(vertices, facecolor='yellow', edgecolor='orange',
-                           linewidth=2, alpha=0.6)
-        ax.add_patch(polygon)
-
-        # Add dimension labels positioned along edge angles
-        edge_dimensions = plot.get('edge_dimensions', [])
-        for dim in edge_dimensions:
-            if dim['length_pixels'] < 20:
-                continue
-            
-            start = np.array(dim['start_point'])
-            end = np.array(dim['end_point'])
-            mid_point = (start + end) / 2
-            edge_vector = end - start
-            edge_length = np.linalg.norm(edge_vector)
-
-            if edge_length > 10:
-                # Calculate edge angle for proper text rotation
-                text_angle = np.arctan2(edge_vector[1], edge_vector[0]) * 180 / np.pi
-
-                # Normalize text_angle to prevent upside-down text
-                if text_angle > 90:
-                    text_angle -= 180
-                elif text_angle < -90:
-                    text_angle += 180
-
-                # Create perpendicular offset for label positioning
-                perp_vector = np.array([-edge_vector[1], edge_vector[0]])
-                if np.linalg.norm(perp_vector) > 0:
-                    perp_vector = perp_vector / np.linalg.norm(perp_vector) * 15  # Reduced offset distance
-
-                    # Ensure the label is outside the polygon
-                    vec_from_centroid = mid_point - plot_centroid
-                    if np.dot(vec_from_centroid, perp_vector) < 0:
-                        perp_vector *= -1
-
-
-                    # Position label closer to the edge
-                    label_pos = mid_point + perp_vector
-
-                    dim_text = f"{dim['length_meters']}m"
-                    text_color = 'darkgreen' if dim.get('source') == 'OCR_detected' else 'darkblue'
-
-                    # Add text with rotation parallel to the edge
-                    ax.text(label_pos[0], label_pos[1], dim_text,
-                           fontsize=8, fontweight='normal',  # Reduced font weight
-                           ha='center', va='center',
-                           color=text_color, alpha=0.9,
-                           fontfamily='sans-serif',
-                           rotation=text_angle)  # Rotate text parallel to edge
-
-        centroid = plot['centroid']
-        area_text = f"{plot['area_value']}"
-        ax.text(centroid[0], centroid[1], area_text,
-                fontsize=12, fontweight='bold', ha='center', va='center')
-
-        ax.set_title(f'Site Plan - Plot {plot["id"]} Highlighted', fontsize=16, fontweight='bold')
-        ax.axis('off')
-        plt.tight_layout()
-
-        filename = f'plot_{plot["id"]}_overview_highlighted.{output_format}'
-        plt.savefig(os.path.join(output_dir, filename), format=output_format, bbox_inches='tight', dpi=300 if output_format == 'jpeg' else None)
-        plt.close()
-
-
-def create_individual_plot_images_enhanced(plots_data, output_dir, save_individual_plots=True, output_format='svg'):
-    """
-    Create individual plot images for all polygon types with properly aligned edge labels
-    """
-    print("Creating individual plot images with accurate meter dimensions...")
-    n_plots = len(plots_data)
-    if n_plots == 0:
-        return
-    
-    cols = int(np.ceil(np.sqrt(n_plots)))
-    rows = int(np.ceil(n_plots / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 6 * rows))
-    
-    if n_plots == 1:
-        axes = np.array([[axes]])
-    elif rows == 1 or cols == 1:
-        axes = np.array(axes).flatten()
-    else:
-        axes = axes.flatten()
-    
-    for i in range(len(axes)):
-        if i >= n_plots:
-            axes[i].axis('off')
-    
-    for i, plot in enumerate(plots_data):
-        ax = axes[i]
-        vertices = plot['approx'].reshape(-1, 2)
-        center_x = np.mean(vertices[:, 0])
-        center_y = np.mean(vertices[:, 1])
-        normalized_vertices = vertices - [center_x, center_y]
-        max_extent = np.max(np.abs(normalized_vertices))
-
-        plot_polygon = Polygon(vertices)
-        plot_centroid = np.array(plot_polygon.centroid.coords[0])
-        # Fallback to moments centroid if shapely fails
-        if plot_centroid is None:
-            plot_centroid = np.array(plot['centroid'])
-
-        scale = 100 / max_extent if max_extent > 0 else 1
-        display_vertices = normalized_vertices * scale + [150, 150]
-        
-        colors = {
-            'Quadrilateral': 'yellow', 'Pentagon': 'lightyellow',
-            'Hexagon': 'wheat', 'Heptagon': 'khaki', 'Octagon': 'lemonchiffon'
-        }
-        shape_type = plot.get('shape_type', 'Polygon')
-        color = colors.get(shape_type, 'yellow')
-        
-        polygon = MPLPolygon(display_vertices, facecolor=color, edgecolor='black', 
-                           linewidth=2, alpha=0.8)
-        ax.add_patch(polygon)
-        
-        area_text = f"{plot['area_value']}"
-        ax.text(150, 150, area_text, fontsize=10, fontweight='bold',
-                ha='center', va='center', fontfamily='sans-serif')
-        
-        edge_dimensions = plot.get('edge_dimensions', [])
-        for dim in edge_dimensions:
-            if dim['length_pixels'] < 20:
-                continue
-                
-            start = np.array(dim['start_point'])
-            end = np.array(dim['end_point'])
-            start_display = (start - [center_x, center_y]) * scale + [150, 150]
-            end_display = (end - [center_x, center_y]) * scale + [150, 150]
-            mid_point = (start_display + end_display) / 2
-            edge_vector = end_display - start_display
-            edge_length = np.linalg.norm(edge_vector)
-
-            if edge_length > 10:
-                # Calculate edge angle for proper text rotation
-                text_angle = np.arctan2(edge_vector[1], edge_vector[0]) * 180 / np.pi
-
-                # Normalize text_angle to prevent upside-down text
-                if text_angle > 90:
-                    text_angle -= 180
-                elif text_angle < -90:
-                    text_angle += 180
-
-                perp_vector = np.array([-edge_vector[1], edge_vector[0]])
-                if np.linalg.norm(perp_vector) > 0:
-                    perp_vector = perp_vector / np.linalg.norm(perp_vector) * 18  # Reduced offset
-
-                    # Ensure the label is outside the polygon
-                    vec_from_centroid = mid_point - (np.array([center_x, center_y]) * scale + [150, 150])
-                    if np.dot(vec_from_centroid, perp_vector) < 0:
-                        perp_vector *= -1
-
-                    label_pos = mid_point + perp_vector
-
-                    dim_text = f"{dim['length_meters']}m"
-                    text_color = 'darkgreen' if dim.get('source') == 'OCR_detected' else 'darkblue'
-
-                    # Add rotated text parallel to the edge
-                    ax.text(label_pos[0], label_pos[1], dim_text,
-                           fontsize=7, fontweight='normal',  # Reduced font weight and size
-                           ha='center', va='center',
-                           color=text_color, alpha=0.9,
-                           fontfamily='sans-serif',
-                           rotation=text_angle)  # Rotate text parallel to edge
-                    
-                    # Draw dimension lines closer to the edge
-                    line_offset = perp_vector * 0.6  # Reduced line offset
-                    line_start = start_display + line_offset
-                    line_end = end_display + line_offset
-                    ax.plot([line_start[0], line_end[0]],
-                           [line_start[1], line_end[1]],
-                           'k-', linewidth=0.8, alpha=0.7)  # Thinner line
-                    ax.plot([line_start[0], start_display[0] + line_offset[0]],
-                           [line_start[1], start_display[1] + line_offset[1]],
-                           'k-', linewidth=0.8, alpha=0.7)
-                    ax.plot([line_end[0], end_display[0] + line_offset[0]],
-                           [line_end[1], end_display[1] + line_offset[1]],
-                           'k-', linewidth=0.8, alpha=0.7)
-        
-        ax.set_xlim(30, 270)
-        ax.set_ylim(270, 30)
-        ax.set_aspect('equal')
-        ax.axis('off')
-        num_sides = plot.get('num_sides', len(vertices))
-        ax.set_title(f'{shape_type} Plot {plot["id"]} ({num_sides} sides)\nArea: {area_text} sq.m', 
-                    fontsize=8, fontweight='bold', pad=10, fontfamily='sans-serif')
-        border = patches.Rectangle((40, 40), 220, 220, linewidth=2, 
-                                 edgecolor='orange', facecolor='none')
-        ax.add_patch(border)
-        
-        if save_individual_plots:
-            create_single_plot_image(plot, i, output_dir, color)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f'all_plots_with_dimensions.{output_format}'),
-               format=output_format, bbox_inches='tight', dpi=300 if output_format == 'jpeg' else None)
-    plt.close()
-
-
-def create_single_plot_image(plot, index, output_dir, color, output_format='svg'):
-    """
-    Create a single plot image with properly aligned edge labels
-    """
-    fig_single, ax_single = plt.subplots(figsize=(6, 6))
-    vertices = plot['approx'].reshape(-1, 2)
-    center_x = np.mean(vertices[:, 0])
-    center_y = np.mean(vertices[:, 1])
-    normalized_vertices = vertices - [center_x, center_y]
-    max_extent = np.max(np.abs(normalized_vertices))
-    scale = 120 / max_extent if max_extent > 0 else 1
-
-    plot_polygon = Polygon(vertices)
-    plot_centroid = np.array(plot_polygon.centroid.coords[0])
-    # Fallback to moments centroid if shapely fails
-    if plot_centroid is None:
-        plot_centroid = np.array(plot['centroid'])
-
-    display_vertices = normalized_vertices * scale + [200, 200]
-    
-    polygon_single = MPLPolygon(display_vertices, facecolor=color, 
-                              edgecolor='black', linewidth=2, alpha=0.8)
-    ax_single.add_patch(polygon_single)
-    
-    area_text = f"{plot['area_value']}"
-    ax_single.text(200, 200, area_text, fontsize=12, fontweight='bold',
-                  ha='center', va='center', fontfamily='sans-serif')
-    
-    edge_dimensions = plot.get('edge_dimensions', [])
-    for dim in edge_dimensions:
-        if dim['length_pixels'] < 20:
-            continue
-            
-        start = np.array(dim['start_point'])
-        end = np.array(dim['end_point'])
-        start_display = (start - [center_x, center_y]) * scale + [200, 200]
-        end_display = (end - [center_x, center_y]) * scale + [200, 200]
-        mid_point = (start_display + end_display) / 2
-        edge_vector = end_display - start_display
-        edge_length = np.linalg.norm(edge_vector)
-
-        if edge_length > 10:
-            # Calculate edge angle for proper text rotation
-            text_angle = np.arctan2(edge_vector[1], edge_vector[0]) * 180 / np.pi
-
-            # Normalize text_angle to prevent upside-down text
-            if text_angle > 90:
-                text_angle -= 180
-            elif text_angle < -90:
-                text_angle += 180
-
-            perp_vector = np.array([-edge_vector[1], edge_vector[0]])
-            if np.linalg.norm(perp_vector) > 0:
-                perp_vector = perp_vector / np.linalg.norm(perp_vector) * 20  # Reduced offset
-
-                # Ensure the label is outside the polygon
-                vec_from_centroid = mid_point - (np.array([center_x, center_y]) * scale + [200, 200])
-                if np.dot(vec_from_centroid, perp_vector) < 0:
-                    perp_vector *= -1
-
-                label_pos = mid_point + perp_vector
-
-                dim_text = f"{dim['length_meters']}m"
-                text_color = 'darkgreen' if dim.get('source') == 'OCR_detected' else 'darkblue'
-
-                # Add rotated text parallel to the edge
-                ax_single.text(label_pos[0], label_pos[1], dim_text,
-                              fontsize=9, fontweight='normal',  # Reduced font weight
-                              ha='center', va='center',
-                              color=text_color,
-                              fontfamily='sans-serif',
-                              rotation=text_angle)  # Rotate text parallel to edge
-                
-                # Draw dimension lines closer to edge
-                line_offset = perp_vector * 0.7  # Reduced line offset
-                line_start = start_display + line_offset
-                line_end = end_display + line_offset
-                ax_single.plot([line_start[0], line_end[0]],
-                              [line_start[1], line_end[1]],
-                              'k-', linewidth=1, alpha=0.8)  # Slightly thinner line
-                ax_single.plot([line_start[0], start_display[0] + line_offset[0]],
-                              [line_start[1], start_display[1] + line_offset[1]],
-                              'k-', linewidth=1, alpha=0.8)
-                ax_single.plot([line_end[0], end_display[0] + line_offset[0]],
-                              [line_end[1], end_display[1] + line_offset[1]],
-                              'k-', linewidth=1, alpha=0.8)
-    
-    ax_single.set_xlim(50, 350)
-    ax_single.set_ylim(350, 50)
-    ax_single.set_aspect('equal')
-    ax_single.axis('off')
-    shape_type = plot.get('shape_type', 'Polygon')
-    num_sides = plot.get('num_sides', len(vertices))
-    ax_single.set_title(f'{shape_type} Plot {plot["id"]}\nArea: {area_text} sq.m', 
-                       fontsize=12, fontweight='bold', pad=15, fontfamily='sans-serif')
-    border_single = patches.Rectangle((60, 60), 280, 280, linewidth=3, 
-                                    edgecolor='darkorange', facecolor='none')
-    ax_single.add_patch(border_single)
-    
-    filename = f'plot_{plot["id"]}_{shape_type.lower()}_{area_text}sqm_with_dimensions.svg'
-    plt.savefig(os.path.join(output_dir, filename),
-               format='svg', bbox_inches='tight')
-    plt.close()
-
-def detect_rectangular_plots_alternative(binary_image, original_image):
-    """
-    Alternative detection method with more relaxed parameters
-    """
-    print("Using alternative detection method...")
-    edges = cv2.Canny(binary_image, 50, 150)
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100,
-                           minLineLength=50, maxLineGap=10)
-    rectangular_plots = []
-    if lines is not None:
-        line_mask = np.zeros_like(binary_image)
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            cv2.line(line_mask, (x1, y1), (x2, y2), 255, 2)
-        contours, _ = cv2.findContours(line_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > 1000:
-                x, y, w, h = cv2.boundingRect(contour)
-                centroid = (x + w//2, y + h//2)
-                rectangular_plots.append({
-                    'contour': contour,
-                    'approx': cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True),
-                    'area': area,
-                    'centroid': centroid,
-                    'bounding_rect': (x, y, w, h),
-                    'shape_type': 'Quadrilateral',
-                    'num_sides': 4
-                })
-    return rectangular_plots
 
 def save_json_data(plots_data, output_dir='site_plan_output'):
     """
-    Save plot data to JSON file including dimensions
+    Save plot data to JSON file for further analysis
     """
-    json_data = {
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    json_output = {
         'site_plan_analysis': {
             'total_plots': len(plots_data),
             'plots': []
         }
     }
     for plot in plots_data:
-        plot_info = {
+        plot_json = {
             'plot_id': plot['id'],
-            'area_value': plot['area_value'],
-            'area_pixels': plot['area_pixels'],
-            'centroid': plot['centroid'],
-            'bounding_rect': plot['bounding_rect'],
             'vertices': plot['vertices'],
+            'centroid': plot['centroid'],
+            'area_pixels': int(plot['area_pixels']),
+            'area_value': plot['area_value'],
             'edge_dimensions': plot['edge_dimensions'],
             'shape_type': plot['shape_type'],
             'num_sides': plot['num_sides']
         }
-        json_data['site_plan_analysis']['plots'].append(plot_info)
+        json_output['site_plan_analysis']['plots'].append(plot_json)
+    
+    json_filepath = os.path.join(output_dir, 'site_plan_data.json')
+    with open(json_filepath, 'w') as f:
+        json.dump(json_output, f, indent=2)
+    
+    print(f"Saved analysis data to: {json_filepath}")
+    return json_filepath
 
-    os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, 'site_plan_data.json'), 'w') as f:
-        json.dump(json_data, f, indent=2)
-    print(f"Data saved to {output_dir}/site_plan_data.json")
 
 def analyze_site_plan(image_path, save_individual_plots=True, output_format='svg'):
     """
@@ -734,7 +703,7 @@ def analyze_site_plan(image_path, save_individual_plots=True, output_format='svg
         plots_data.append(plot_info)
 
     if plots_data:
-        create_styled_output(original_image, plots_data, save_individual_plots=save_individual_plots, output_format=output_format)
+        create_styled_output(original_image, plots_data, save_individual_plots=save_individual_plots, output_format=output_format, interactive_mode=(output_format=='svg'))
         save_json_data(plots_data)
 
     print(f"\n=== SITE PLAN ANALYSIS SUMMARY ===")
@@ -742,13 +711,166 @@ def analyze_site_plan(image_path, save_individual_plots=True, output_format='svg
     print(f"Total plots detected: {len(plots_data)}")
     print()
     for plot in plots_data:
-        print(f"📍 Plot {plot['id']} ({plot['shape_type']}):")
-        print(f"   Area: {plot['area_value']} sq.m (number inside the plot)")
+        print(f"Plot {plot['id']} ({plot['shape_type']}):")
+        print(f"   Area: {plot['area_value']} sq.m (extracted from plot center)")
         for dim in plot.get('edge_dimensions', []):
-            status = "📖 detected from drawing" if dim.get('source') == 'OCR_detected' else "📏 calculated"
+            status = "detected from drawing" if dim.get('source') == 'OCR_detected' else "calculated"
             print(f"   Edge {dim['edge_index']+1}: {dim['length_meters']} m ({status})")
         pixel_area_sqm = plot['area_pixels'] * (scale_factor ** 2)
         print(f"   Calculated area from dimensions: {pixel_area_sqm:.1f} sq.m")
         print()
 
     return plots_data
+
+
+# Utility functions for interactive usage
+def highlight_plot(image_path, plot_id, output_dir='site_plan_output'):
+    """
+    Convenience function to highlight a specific plot
+    """
+    plots_data = analyze_site_plan(image_path, save_individual_plots=False, output_format='svg')
+    if plots_data:
+        original_image, _ = load_and_preprocess_image(image_path)
+        highlighted_overview = create_highlighted_overview(original_image, plots_data, plot_id, 'svg')
+        
+        if highlighted_overview:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            
+            filename = f'highlighted_plot_{plot_id}.svg'
+            filepath = os.path.join(output_dir, filename)
+            with open(filepath, 'w') as f:
+                f.write(highlighted_overview)
+            print(f"Highlighted plot {plot_id} saved to: {filepath}")
+            return filepath
+    return None
+
+
+def get_plot_summary(image_path):
+    """
+    Get a quick summary of all detected plots
+    """
+    plots_data = analyze_site_plan(image_path, save_individual_plots=False, output_format='png')
+    
+    summary = {
+        'total_plots': len(plots_data),
+        'plots': []
+    }
+    
+    for plot in plots_data:
+        plot_summary = {
+            'id': plot['id'],
+            'shape_type': plot['shape_type'],
+            'num_sides': plot['num_sides'],
+            'area_sqm': plot['area_value'],
+            'vertices': plot['vertices'],
+            'edge_lengths_m': [dim['length_meters'] for dim in plot['edge_dimensions']]
+        }
+        summary['plots'].append(plot_summary)
+    
+    return summary
+
+
+def batch_analyze_plans(image_directory, output_base_dir='batch_analysis'):
+    """
+    Analyze multiple site plans in a directory
+    """
+    import glob
+    
+    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
+    image_files = []
+    
+    for ext in image_extensions:
+        image_files.extend(glob.glob(os.path.join(image_directory, ext)))
+        image_files.extend(glob.glob(os.path.join(image_directory, ext.upper())))
+    
+    results = {}
+    
+    for image_file in image_files:
+        print(f"\n{'='*50}")
+        print(f"Analyzing: {os.path.basename(image_file)}")
+        print(f"{'='*50}")
+        
+        try:
+            # Create individual output directory for each image
+            base_name = os.path.splitext(os.path.basename(image_file))[0]
+            output_dir = os.path.join(output_base_dir, base_name)
+            
+            plots_data = analyze_site_plan(image_file, save_individual_plots=True, output_format='svg')
+            results[base_name] = {
+                'status': 'success',
+                'plots_count': len(plots_data),
+                'plots_data': plots_data,
+                'output_directory': output_dir
+            }
+            
+        except Exception as e:
+            print(f"Error analyzing {image_file}: {e}")
+            results[base_name] = {
+                'status': 'error',
+                'error': str(e)
+            }
+    
+    # Save batch summary
+    if not os.path.exists(output_base_dir):
+        os.makedirs(output_base_dir)
+    
+    summary_file = os.path.join(output_base_dir, 'batch_analysis_summary.json')
+    with open(summary_file, 'w') as f:
+        json.dump(results, f, indent=2, default=str)
+    
+    print(f"\n{'='*50}")
+    print("BATCH ANALYSIS COMPLETE")
+    print(f"{'='*50}")
+    print(f"Total files processed: {len(results)}")
+    print(f"Successful: {sum(1 for r in results.values() if r['status'] == 'success')}")
+    print(f"Failed: {sum(1 for r in results.values() if r['status'] == 'error')}")
+    print(f"Summary saved to: {summary_file}")
+    
+    return results
+
+
+# Example usage and testing functions
+def run_example():
+    """
+    Example of how to use the site plan analyzer
+    """
+    # Example usage - replace with your actual image path
+    image_path = "site_plan.jpg"
+    
+    print("Site Plan Analyzer - Example Usage")
+    print("=" * 40)
+    
+    try:
+        # Basic analysis
+        print("1. Running basic analysis...")
+        plots_data = analyze_site_plan(image_path)
+        
+        # Highlight specific plot
+        print("\n2. Highlighting plot 1...")
+        highlight_plot(image_path, 1)
+        
+        # Get summary
+        print("\n3. Getting plot summary...")
+        summary = get_plot_summary(image_path)
+        print(f"Summary: {summary['total_plots']} plots detected")
+        
+        return plots_data
+        
+    except Exception as e:
+        print(f"Example failed: {e}")
+        print("Make sure you have a valid image file at the specified path.")
+        return None
+
+
+if __name__ == "__main__":
+    # Run example if script is executed directly
+    print("Site Plan Analyzer - Complete Package")
+    print("=" * 50)
+    print("Available functions:")
+    print("- analyze_site_plan(image_path)")
+    print("- highlight_plot(image_path, plot_id)")
+    print("- get_plot_summary(image_path)")
+    print("- batch_analyze_plans(directory_path)")
+    print("- run_example()")
+    print("=" * 50)
