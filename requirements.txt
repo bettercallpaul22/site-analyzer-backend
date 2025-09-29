@@ -1,0 +1,9 @@
+flask
+flask-cors
+opencv-python-headless
+numpy
+matplotlib
+shapely
+pytesseract
+setuptools
+wheel

@@ -1,0 +1,11 @@
+{
+  "name": "site-analyzer-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "heroku-postbuild": "cd frontend && npm install && npm run build && cp -r build ../api/"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
