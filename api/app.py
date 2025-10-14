@@ -150,31 +150,32 @@ def analyze_image():
 @app.route('/highlight-plot', methods=['POST'])
 def highlight_plot():
     global current_plots_data, current_original_image
-    
+
     try:
         data = request.get_json()
         if not data or 'plot_id' not in data:
             return jsonify({'error': 'Plot ID is required'}), 400
-        
+
         plot_id = data['plot_id']
-        
+        show_labels = data.get('show_labels', False)  # Default to False - backend now returns plots without labels
+
         # Validate that we have the required data
         if not current_plots_data or current_original_image is None:
             return jsonify({'error': 'No analysis data available. Please run analysis first.'}), 400
-        
+
         # Find the plot
         selected_plot = next((plot for plot in current_plots_data if plot['id'] == plot_id), None)
         if not selected_plot:
             return jsonify({'error': f'Plot {plot_id} not found'}), 404
-        
+
         # Generate highlighted overview
-        highlighted_svg = create_highlighted_overview(current_original_image, current_plots_data, plot_id)
-        
+        highlighted_svg = create_highlighted_overview(current_original_image, current_plots_data, plot_id, show_labels=show_labels)
+
         if highlighted_svg:
             return jsonify({'highlighted_overview': highlighted_svg}), 200
         else:
             return jsonify({'error': 'Failed to generate highlighted overview'}), 500
-            
+
     except Exception as e:
         print(f"Error highlighting plot: {str(e)}")
         traceback.print_exc()
@@ -219,7 +220,7 @@ def home():
 
             <div class="endpoint">
                 <span class="method">POST</span> /highlight-plot<br>
-                <small>Generate highlighted overview for a specific plot</small>
+                <small>Generate highlighted overview for a specific plot (supports show_labels toggle)</small>
             </div>
 
             <div class="endpoint">

@@ -348,7 +348,7 @@ def extract_area_from_plot_center(image, plot_bounds):
     return estimated_area
 
 
-def create_highlighted_overview(original_image, plots_data, selected_plot_id, output_format='svg'):
+def create_highlighted_overview(original_image, plots_data, selected_plot_id, output_format='svg', show_labels=False):
     """
     Create a dynamically highlighted overview where only the selected plot is highlighted
     with a distinct color while others remain in default colors
@@ -393,19 +393,20 @@ def create_highlighted_overview(original_image, plots_data, selected_plot_id, ou
             ax.add_patch(polygon)
             
             # Display area value instead of plot ID
-            centroid = plot['centroid']
-            text_color = 'white' if plot['id'] == selected_plot_id else 'black'
-            font_weight = 'bold' if plot['id'] == selected_plot_id else 'normal'
-            font_size = 14 if plot['id'] == selected_plot_id else 12
-            
-            # Show area value at centroid
-            area_text = f"{plot['area_value']}"
+            if show_labels:
+                centroid = plot['centroid']
+                text_color = 'white' if plot['id'] == selected_plot_id else 'black'
+                font_weight = 'bold' if plot['id'] == selected_plot_id else 'normal'
+                font_size = 14 if plot['id'] == selected_plot_id else 12
 
-            ax.text(centroid[0], centroid[1], area_text,
-                    fontsize=font_size, fontweight=font_weight, ha='center', va='center',
-                    color=text_color,
-                    bbox=dict(facecolor='white' if plot['id'] != selected_plot_id else 'black',
-                             alpha=0.8, pad=3, edgecolor='none'))
+                # Show area value at centroid
+                area_text = f"{plot['area_value']}"
+
+                ax.text(centroid[0], centroid[1], area_text,
+                        fontsize=font_size, fontweight=font_weight, ha='center', va='center',
+                        color=text_color,
+                        bbox=dict(facecolor='white' if plot['id'] != selected_plot_id else 'black',
+                                 alpha=0.8, pad=3, edgecolor='none'))
 
             # Add edge dimensions for highlighted plot
             if plot['id'] == selected_plot_id:
@@ -449,18 +450,18 @@ def create_highlighted_overview(original_image, plots_data, selected_plot_id, ou
         return None
 
 
-def create_individual_highlighted_overviews(original_image, plots_data, output_dir='site_plan_output', output_format='svg'):
+def create_individual_highlighted_overviews(original_image, plots_data, output_dir='site_plan_output', output_format='svg', show_labels=False):
     """
     Create individual overview images with each plot highlighted one at a time
     """
     print("Creating individual highlighted overview images...")
-    
+
     for plot in plots_data:
-        highlighted_svg = create_highlighted_overview(original_image, plots_data, plot['id'], output_format)
+        highlighted_svg = create_highlighted_overview(original_image, plots_data, plot['id'], output_format, show_labels)
         if highlighted_svg:
             filename = f'plot_{plot["id"]}_overview_highlighted.{output_format}'
             filepath = os.path.join(output_dir, filename)
-            
+
             if output_format == 'svg':
                 with open(filepath, 'w') as f:
                     f.write(highlighted_svg)
@@ -469,7 +470,7 @@ def create_individual_highlighted_overviews(original_image, plots_data, output_d
                 img_data = base64.b64decode(highlighted_svg.split(',')[1])
                 with open(filepath, 'wb') as f:
                     f.write(img_data)
-            
+
             print(f"Saved: {filename}")
 
 
@@ -551,7 +552,7 @@ def create_single_plot_image(plot_data, output_dir, output_format='svg'):
     print(f"Saved: {filename}")
 
 
-def create_styled_output(original_image, plots_data, output_dir='site_plan_output', save_individual_plots=True, output_format='svg', interactive_mode=True, highlighted_plot_id=None):
+def create_styled_output(original_image, plots_data, output_dir='site_plan_output', save_individual_plots=True, output_format='svg', interactive_mode=True, highlighted_plot_id=None, show_labels=False):
     """
     Updated create_styled_output to support dynamic highlighting and display area values
     """
