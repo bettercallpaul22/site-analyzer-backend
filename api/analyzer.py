@@ -367,7 +367,7 @@ def create_highlighted_overview(original_image, plots_data, selected_plot_id, ou
         }
         
         default_colors = {
-            'fill': '#dadada', 
+            'fill': "#ffffff", 
             'stroke': '#f7eb07'   # Yellow stroke
         }
 
@@ -400,13 +400,13 @@ def create_highlighted_overview(original_image, plots_data, selected_plot_id, ou
                 font_size = 14 if plot['id'] == selected_plot_id else 12
 
                 # Show area value at centroid
-                area_text = f"{plot['area_value']}"
+                # area_text = f"{plot['area_value']}"
 
-                ax.text(centroid[0], centroid[1], area_text,
-                        fontsize=font_size, fontweight=font_weight, ha='center', va='center',
-                        color=text_color,
-                        bbox=dict(facecolor='white' if plot['id'] != selected_plot_id else 'black',
-                                 alpha=0.8, pad=3, edgecolor='none'))
+                # ax.text(centroid[0], centroid[1], area_text,
+                #         fontsize=font_size, fontweight=font_weight, ha='center', va='center',
+                #         color=text_color,
+                #         bbox=dict(facecolor='white' if plot['id'] != selected_plot_id else 'black',
+                #                  alpha=0.8, pad=3, edgecolor='none'))
 
             # Add edge dimensions for highlighted plot
             if plot['id'] == selected_plot_id:
@@ -417,12 +417,12 @@ def create_highlighted_overview(original_image, plots_data, selected_plot_id, ou
                     mid_y = (start[1] + end[1]) / 2
 
                     # Add dimension text in meters
-                    ax.text(mid_x, mid_y, f"{dim['length_meters']}m",
-                            ha='center', va='center', fontsize=10, fontweight='bold',
-                            color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.9))
+                    # ax.text(mid_x, mid_y, f"{dim['length_meters']}m",
+                    #         ha='center', va='center', fontsize=10, fontweight='bold',
+                    #         color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.9))
 
-        ax.set_title(f'Site Plan - Plot {selected_plot_id} Highlighted',
-                    fontsize=16, fontweight='bold')
+        # ax.set_title(f'Site Plan - Plot {selected_plot_id} Highlighted',
+        #             fontsize=16, fontweight='bold')
         ax.axis('off')
         plt.tight_layout()
 
@@ -571,7 +571,7 @@ def create_styled_output(original_image, plots_data, output_dir='site_plan_outpu
     }
     
     default_colors = {
-        'fill': '#dadada',    # Default white
+        'fill': "#ffffff",    # Default white
         'stroke': '#f7eb07'   # Default yellow stroke
     }
 
